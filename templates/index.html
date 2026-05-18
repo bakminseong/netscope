@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>NetScope - 실시간 네트워크 보안 모니터링</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0d1117; color: #e6edf3; font-family: 'Segoe UI', sans-serif; }
+
+    .header {
+      background: #161b22;
+      padding: 16px 24px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header h1 { font-size: 20px; color: #58a6ff; }
+    .status-dot {
+      width: 10px; height: 10px;
+      background: #3fb950; border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.3; }
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card h2 { font-size: 14px; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .card.full { grid-column: 1 / -1; }
+
+    #packet-log {
+      height: 220px;
+      overflow-y: auto;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .log-row {
+      display: grid;
+      grid-template-columns: 60px 60px 110px 110px 1fr;
+      gap: 8px;
+      padding: 4px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .log-row:hover { background: #1c2128; }
+    .tag {
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: bold;
+      text-align: center;
+    }
+    .tag-TCP  { background: #1f6feb; color: #fff; }
+    .tag-UDP  { background: #388bfd22; color: #79c0ff; border: 1px solid #388bfd; }
+    .tag-ARP  { background: #9e6a0322; color: #d29922; border: 1px solid #9e6a03; }
+    .tag-DNS  { background: #2ea04322; color: #3fb950; border: 1px solid #2ea043; }
+    .tag-OTHER { background: #30363d; color: #8b949e; }
+
+    #alert-list { max-height: 180px; overflow-y: auto; }
+    .alert-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px;
+      margin-bottom: 6px;
+      border-radius: 6px;
+      font-size: 13px;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; } }
+    .alert-HIGH  { background: #ff000015; border-left: 3px solid #f85149; }
+    .alert-MEDIUM { background: #d2992215; border-left: 3px solid #d29922; }
+    .alert-badge { font-size: 11px; font-weight: bold; white-space: nowrap; }
+    .badge-HIGH   { color: #f85149; }
+    .badge-MEDIUM { color: #d29922; }
+
+    canvas { max-height: 200px; }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .stat-box { text-align: center; padding: 8px; background: #0d1117; border-radius: 6px; }
+    .stat-box .num { font-size: 22px; font-weight: bold; color: #58a6ff; }
+    .stat-box .label { font-size: 11px; color: #8b949e; margin-top: 2px; }
+    .no-alert { color: #3fb950; font-size: 13px; padding: 8px; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="status-dot"></div>
+  <h1>🛡 NetScope</h1>
+  <span style="color:#8b949e; font-size:13px;">실시간 네트워크 보안 모니터링</span>
+  <a href="/report" style="margin-left:auto; background:#238636; color:#fff; padding:6px 14px; border-radius:6px; font-size:13px; text-decoration:none;">📄 리포트 저장</a>
+</div>
+
+<div class="grid">
+
+  <div class="card">
+    <h2>📡 실시간 패킷 로그</h2>
+    <div id="packet-log"></div>
+  </div>
+
+  <div class="card">
+    <h2>📊 프로토콜 분포</h2>
+    <canvas id="proto-chart"></canvas>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="num" id="s-TCP">0</div><div class="label">TCP</div></div>
+      <div class="stat-box"><div class="num" id="s-UDP">0</div><div class="label">UDP</div></div>
+      <div class="stat-box"><div class="num" id="s-ARP">0</div><div class="label">ARP</div></div>
+      <div class="stat-box"><div class="num" id="s-DNS">0</div><div class="label">DNS</div></div>
+      <div class="stat-box"><div class="num" id="s-OTHER">0</div><div class="label">OTHER</div></div>
+    </div>
+  </div>
+
+  <div class="card full">
+    <h2>⚠️ 위협 탐지 알림</h2>
+    <div id="alert-list">
+      <div class="no-alert">✅ 탐지된 위협 없음</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const socket = io();
+  const logEl = document.getElementById("packet-log");
+  const alertEl = document.getElementById("alert-list");
+  let firstAlert = true;
+
+  const ctx = document.getElementById("proto-chart").getContext("2d");
+  const chart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: ["TCP", "UDP", "ARP", "DNS", "OTHER"],
+      datasets: [{
+        data: [0, 0, 0, 0, 0],
+        backgroundColor: ["#1f6feb", "#388bfd", "#d29922", "#3fb950", "#484f58"],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#e6edf3", font: { size: 12 } } } }
+    }
+  });
+
+  socket.on("packet", (pkt) => {
+    const row = document.createElement("div");
+    row.className = "log-row";
+    row.innerHTML = `
+      <span><span class="tag tag-${pkt.type}">${pkt.type}</span></span>
+      <span style="color:#8b949e">${new Date().toLocaleTimeString()}</span>
+      <span style="color:#79c0ff">${pkt.src || "-"}</span>
+      <span style="color:#a5d6ff">${pkt.dst || "-"}</span>
+      <span style="color:#6e7681">${pkt.detail}</span>
+    `;
+    logEl.prepend(row);
+    while (logEl.children.length > 100) logEl.removeChild(logEl.lastChild);
+  });
+
+  socket.on("stats", (s) => {
+    ["TCP","UDP","ARP","DNS","OTHER"].forEach((k, i) => {
+      document.getElementById("s-"+k).textContent = s[k] || 0;
+      chart.data.datasets[0].data[i] = s[k] || 0;
+    });
+    chart.update("none");
+  });
+
+  socket.on("alert", (a) => {
+    if (firstAlert) { alertEl.innerHTML = ""; firstAlert = false; }
+    const item = document.createElement("div");
+    item.className = `alert-item alert-${a.level}`;
+    item.innerHTML = `
+      <span class="alert-badge badge-${a.level}">[${a.level}]</span>
+      <span style="color:#8b949e">${a.time}</span>
+      <span style="color:#e6edf3"><strong>${a.type}</strong> — ${a.detail}</span>
+    `;
+    alertEl.prepend(item);
+  });
+</script>
+</body>
+</html>
