@@ -13,11 +13,33 @@
 - HTML, JavaScript, Chart.js
 - fpdf2
 
-## 실행 방법
-```bash
+## 요구 사항
+- Linux (Ubuntu / Kali 권장)
+- Python 3.x
+- 네트워크 캡처를 위해 sudo 권한 필요
+
+## 설치 방법
+
+### 1. 레포지토리 클론
+git clone https://github.com/bakminseong/netscope.git
+cd netscope
+
+### 2. 패키지 설치
+sudo pip install scapy flask flask-socketio flask-cors eventlet fpdf2 --break-system-packages
+
+### 3. 네트워크 인터페이스 확인
+ip a
+# 본인 인터페이스 이름 확인 (예: eth0, ens33)
+
+### 4. capture.py 인터페이스 수정
+nano capture.py
+# 마지막 줄 interface="ens33" 을 본인 인터페이스로 변경
+
+### 5. 실행
 sudo python3 app.py
-```
-브라우저에서 `http://[서버IP]:5000` 접속
+
+### 6. 브라우저 접속
+http://[서버IP]:5000
 
 ## 탐지 가능 위협
 | 위협 유형 | 탐지 방법 | 위험도 |
@@ -25,3 +47,8 @@ sudo python3 app.py
 | 포트스캔 | 5초 내 10개 이상 포트 접근 감지 | MEDIUM |
 | ARP 스푸핑 | MAC 주소 변경 감지 | HIGH |
 | 의심 DNS | 악성 키워드 도메인 접근 감지 | MEDIUM |
+
+## 포트스캔 탐지 테스트
+nmap 설치 후 아래 명령어로 테스트 가능
+sudo apt install nmap -y
+sudo nmap -sS [대상IP]
